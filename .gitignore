@@ -222,3 +222,7 @@ __marimo__/
 # Vector store lokal (dapat dibangun ulang dari data/chunks.jsonl)
 data/chroma/
 
+# PDF peraturan mentah lokal berukuran besar
+data/raw/*.pdf
+
+

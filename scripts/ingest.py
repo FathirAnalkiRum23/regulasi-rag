@@ -12,10 +12,17 @@ from pathlib import Path
 
 import pymupdf
 
-PASAL_RE = re.compile(r"^Pasal\s+(\d+[A-Z]?)\s*$")
+PASAL_RE = re.compile(r"^Pasa[lt]\s+(\d+[A-Z]?)\s*$")
 BAB_RE = re.compile(r"^BAB\s+([IVXLC]+)\s*$")
 AYAT_RE = re.compile(r"^\(\d+[a-z]?\)\s")
-NOISE_RE = re.compile(r"^(-\s*\d+\s*-|\d+|www\.[\w.]+|SALINAN|PRESIDEN\s+REPUBLIK\s+INDONESIA)$", re.I)
+NOISE_RE = re.compile(
+    r"^(-\s*\d+\s*-|\d+|www\.[\w.]+|SALINAN|PRESIDEN\s+REPUBLIK\s+INDONESIA|ANOTASI\s+\d{4})$",
+    re.I,
+)
+STOP_RE = re.compile(
+    r"^(Disahkan di Jakarta|TAMBAHAN LEMBARAN NEGARA|KEPANITERAAN DAN SEKRETARIAT JENDERAL)\b",
+    re.I,
+)
 MAX_CHARS = 1800
 
 
@@ -30,12 +37,36 @@ def read_lines(pdf_path: Path) -> list[str]:
     return lines
 
 
+def _split_block_by_size(block: str, max_body: int) -> list[str]:
+    """Pecah blok teks per baris agar tetap di bawah batas max_body."""
+    chunks, buf = [], ""
+    for ln in block.split("\n"):
+        if len(ln) > max_body:
+            if buf:
+                chunks.append(buf)
+                buf = ""
+            for i in range(0, len(ln), max_body):
+                chunks.append(ln[i:i + max_body])
+            continue
+        candidate = f"{buf}\n{ln}" if buf else ln
+        if len(candidate) > max_body and buf:
+            chunks.append(buf)
+            buf = ln
+        else:
+            buf = candidate
+    if buf:
+        chunks.append(buf)
+    return chunks
+
+
 def split_long(text: str) -> list[str]:
     """Pecah pasal panjang per ayat; kalau masih panjang, per ukuran."""
     if len(text) <= MAX_CHARS:
         return [text]
     head, *rest = text.split("\n", 1)
     body = rest[0] if rest else ""
+    max_body = MAX_CHARS - len(head) - 1
+
     parts, cur = [], []
     for ln in body.split("\n"):
         if AYAT_RE.match(ln) and cur:
@@ -44,12 +75,20 @@ def split_long(text: str) -> list[str]:
         cur.append(ln)
     if cur:
         parts.append("\n".join(cur))
-    out, buf = [], ""
+
+    expanded = []
     for p in parts:
-        if buf and len(buf) + len(p) > MAX_CHARS:
+        if len(p) > max_body:
+            expanded.extend(_split_block_by_size(p, max_body))
+        else:
+            expanded.append(p)
+
+    out, buf = [], ""
+    for p in expanded:
+        if buf and len(head) + 1 + len(buf) + 1 + len(p) > MAX_CHARS:
             out.append(f"{head}\n{buf}")
             buf = ""
-        buf = f"{buf}\n{p}".strip()
+        buf = f"{buf}\n{p}" if buf else p
     if buf:
         out.append(f"{head}\n{buf}")
     return out
@@ -74,6 +113,9 @@ def chunk_pdf(pdf_path: Path) -> list[dict]:
         if ln.upper() == "PENJELASAN":
             flush(); pasal, buf = None, []
             section, bab = "penjelasan", ""
+            continue
+        if STOP_RE.match(ln):
+            flush(); pasal, buf = None, []
             continue
         if (m := BAB_RE.match(ln)):
             flush(); pasal, buf = None, []

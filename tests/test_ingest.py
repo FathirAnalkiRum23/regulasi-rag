@@ -37,6 +37,18 @@ def test_split_long_splits_by_ayat_and_preserves_pasal_header():
     assert all(len(part) <= ingest.MAX_CHARS for part in parts)
 
 
+def test_split_long_falls_back_by_size_without_ayat():
+    items = [f"{i}. Definisi nomor {i} tentang pelindungan data pribadi." for i in range(1, 60)]
+    text = "Pasal 1\n" + "\n".join(items)
+    assert len(text) > ingest.MAX_CHARS
+
+    parts = ingest.split_long(text)
+
+    assert len(parts) >= 2
+    assert all(part.startswith("Pasal 1\n") for part in parts)
+    assert all(len(part) <= ingest.MAX_CHARS for part in parts)
+
+
 def test_chunk_pdf_extracts_sections_metadata_and_strips_noise(tmp_path):
     pdf_path = tmp_path / "uu-contoh.pdf"
     doc = pymupdf.open()
@@ -47,12 +59,15 @@ def test_chunk_pdf_extracts_sections_metadata_and_strips_noise(tmp_path):
         "\n".join([
             "SALINAN",
             "PRESIDEN REPUBLIK INDONESIA",
+            "ANOTASI  2025",
             "BAB I",
             "Pasal 1",
             "(1) Definisi pertama.",
             "(2) Definisi kedua.",
-            "Pasal 2",
-            "Ketentuan asas.",
+            "Pasat 9",
+            "Hak menarik kembali persetujuan.",
+            "Disahkan di Jakarta",
+            "JOKO WIDODO",
             "- 1 -",
         ]),
     )
@@ -64,6 +79,8 @@ def test_chunk_pdf_extracts_sections_metadata_and_strips_noise(tmp_path):
             "PENJELASAN",
             "Pasal 1",
             "Cukup jelas.",
+            "TAMBAHAN LEMBARAN NEGARA REPUBLIK INDONESIA NOMOR 6820",
+            "TIM REDAKSI",
             "www.peraturan.go.id",
         ]),
     )
@@ -79,14 +96,16 @@ def test_chunk_pdf_extracts_sections_metadata_and_strips_noise(tmp_path):
     assert chunks[0]["section"] == "batang_tubuh"
     assert chunks[0]["bab"] == "I"
     assert chunks[0]["pasal"] == "1"
-    assert "SALINAN" not in chunks[0]["text"]
-    assert "PRESIDEN REPUBLIK INDONESIA" not in chunks[0]["text"]
-    assert "- 1 -" not in chunks[0]["text"]
+    for noise in ("SALINAN", "PRESIDEN REPUBLIK INDONESIA", "ANOTASI  2025", "- 1 -"):
+        assert noise not in chunks[0]["text"]
 
-    assert chunks[1]["id"] == "uu-contoh:batang_tubuh:pasal-2:0"
-    assert chunks[1]["pasal"] == "2"
+    assert chunks[1]["id"] == "uu-contoh:batang_tubuh:pasal-9:0"
+    assert chunks[1]["pasal"] == "9"
+    assert chunks[1]["text"].startswith("Pasal 9\n")
+    assert "JOKO WIDODO" not in chunks[1]["text"]
 
     assert chunks[2]["id"] == "uu-contoh:penjelasan:pasal-1:0"
     assert chunks[2]["section"] == "penjelasan"
     assert chunks[2]["bab"] == ""
+    assert "TIM REDAKSI" not in chunks[2]["text"]
     assert "www.peraturan.go.id" not in chunks[2]["text"]
