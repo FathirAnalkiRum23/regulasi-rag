@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Vector store lokal (dapat dibangun ulang dari data/chunks.jsonl)
+data/chroma/
+
